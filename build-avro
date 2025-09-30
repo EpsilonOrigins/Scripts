@@ -1,0 +1,528 @@
+#!/bin/bash
+set -e
+
+# Configuration - EDIT THESE PATHS
+
+BOOST_VERSION=“1.74.0”
+BOOST_UNDERSCORE_VERSION=“1_74_0”
+SNAPPY_VERSION=“1.1.9”
+AVRO_VERSION=“1.10.2”
+
+# Default paths
+
+BOOST_SOURCE_DIR=””
+SNAPPY_DIR=””
+AVRO_SOURCE_DIR=””
+BUILD_DIR=”/tmp/avro-static-build”
+INSTALL_PREFIX=”/opt/custom-libs/avro-${AVRO_VERSION}”
+PACKAGE_OUTPUT_DIR=”/tmp/avro-packages”
+
+# Flags
+
+BUILD_BOOST=false
+BUILD_SNAPPY=false
+DOWNLOAD_SOURCES=false
+SKIP_PACKAGE=false
+
+# Parse command line arguments
+
+while [[ $# -gt 0 ]]; do
+case $1 in
+–boost-source)
+BOOST_SOURCE_DIR=”$2”
+shift 2
+;;
+–snappy-dir)
+SNAPPY_DIR=”$2”
+shift 2
+;;
+–avro-source)
+AVRO_SOURCE_DIR=”$2”
+shift 2
+;;
+–build-dir)
+BUILD_DIR=”$2”
+shift 2
+;;
+–install-prefix)
+INSTALL_PREFIX=”$2”
+shift 2
+;;
+–output-dir)
+PACKAGE_OUTPUT_DIR=”$2”
+shift 2
+;;
+–build-boost)
+BUILD_BOOST=true
+shift
+;;
+–build-snappy)
+BUILD_SNAPPY=true
+shift
+;;
+–download)
+DOWNLOAD_SOURCES=true
+shift
+;;
+–skip-package)
+SKIP_PACKAGE=true
+shift
+;;
+–help)
+cat << ‘HELP_EOF’
+Usage: ./build-avro-static.sh [OPTIONS]
+
+Build Avro C++ with statically linked Boost and Snappy dependencies.
+
+Options:
+–boost-source PATH       Path to Boost source directory (boost_1_74_0)
+–snappy-dir PATH         Path to pre-built Snappy installation
+–avro-source PATH        Path to Avro source directory
+–build-dir PATH          Build directory (default: /tmp/avro-static-build)
+–install-prefix PATH     Installation prefix (default: /opt/custom-libs/avro-1.10.2)
+–output-dir PATH         Package output directory (default: /tmp/avro-packages)
+–build-boost             Build Boost from source (requires –boost-source)
+–build-snappy            Build Snappy from source (requires –snappy-dir to be source)
+–download                Download all sources automatically
+–skip-package            Skip packaging step, leave installed directory as-is
+–help                    Show this help message
+
+Examples:
+
+# Build everything from downloaded sources
+
+./build-avro-static.sh –download –build-boost –build-snappy
+
+# Use existing Boost source, build Snappy and Avro
+
+./build-avro-static.sh –boost-source ~/boost_1_74_0 –build-boost   
+–snappy-dir ~/snappy –build-snappy   
+–avro-source ~/avro-src-1.10.2
+
+# Use pre-built Boost and Snappy
+
+./build-avro-static.sh –boost-source /usr/local/boost-1.74.0   
+–snappy-dir /usr/local/snappy   
+–avro-source ~/avro-src-1.10.2
+HELP_EOF
+exit 0
+;;
+*)
+echo “Unknown option: $1”
+echo “Run with –help for usage information”
+exit 1
+;;
+esac
+done
+
+# Create build directory
+
+mkdir -p “${BUILD_DIR}”
+mkdir -p “${PACKAGE_OUTPUT_DIR}”
+
+# Download sources if requested
+
+if [ “$DOWNLOAD_SOURCES” = true ]; then
+echo “=== Downloading sources ===”
+cd “${BUILD_DIR}”
+
+```
+if [ -z "$BOOST_SOURCE_DIR" ] || [ ! -d "$BOOST_SOURCE_DIR" ]; then
+    echo "Downloading Boost ${BOOST_VERSION}..."
+    if [ ! -f "boost_${BOOST_UNDERSCORE_VERSION}.tar.gz" ]; then
+        wget "https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE_VERSION}.tar.gz"
+    fi
+    tar xzf "boost_${BOOST_UNDERSCORE_VERSION}.tar.gz"
+    BOOST_SOURCE_DIR="${BUILD_DIR}/boost_${BOOST_UNDERSCORE_VERSION}"
+    BUILD_BOOST=true
+fi
+
+if [ -z "$SNAPPY_DIR" ] || [ ! -d "$SNAPPY_DIR" ]; then
+    echo "Downloading Snappy ${SNAPPY_VERSION}..."
+    if [ ! -f "snappy-${SNAPPY_VERSION}.tar.gz" ]; then
+        wget "https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz" -O "snappy-${SNAPPY_VERSION}.tar.gz"
+    fi
+    tar xzf "snappy-${SNAPPY_VERSION}.tar.gz"
+    SNAPPY_DIR="${BUILD_DIR}/snappy-${SNAPPY_VERSION}"
+    BUILD_SNAPPY=true
+fi
+
+if [ -z "$AVRO_SOURCE_DIR" ] || [ ! -d "$AVRO_SOURCE_DIR" ]; then
+    echo "Downloading Avro ${AVRO_VERSION}..."
+    if [ ! -f "avro-src-${AVRO_VERSION}.tar.gz" ]; then
+        wget "https://archive.apache.org/dist/avro/avro-${AVRO_VERSION}/avro-src-${AVRO_VERSION}.tar.gz"
+    fi
+    tar xzf "avro-src-${AVRO_VERSION}.tar.gz"
+    AVRO_SOURCE_DIR="${BUILD_DIR}/avro-src-${AVRO_VERSION}"
+fi
+```
+
+fi
+
+# Validate required paths
+
+if [ -z “$BOOST_SOURCE_DIR” ] || [ ! -d “$BOOST_SOURCE_DIR” ]; then
+echo “ERROR: Boost source directory not specified or not found: $BOOST_SOURCE_DIR”
+echo “Use –boost-source PATH or –download”
+exit 1
+fi
+
+if [ -z “$SNAPPY_DIR” ] || [ ! -d “$SNAPPY_DIR” ]; then
+echo “ERROR: Snappy directory not specified or not found: $SNAPPY_DIR”
+echo “Use –snappy-dir PATH or –download”
+exit 1
+fi
+
+if [ -z “$AVRO_SOURCE_DIR” ] || [ ! -d “$AVRO_SOURCE_DIR” ]; then
+echo “ERROR: Avro source directory not specified or not found: $AVRO_SOURCE_DIR”
+echo “Use –avro-source PATH or –download”
+exit 1
+fi
+
+# Set installation paths
+
+BOOST_INSTALL_DIR=”${BUILD_DIR}/boost-install”
+SNAPPY_INSTALL_DIR=”${BUILD_DIR}/snappy-install”
+
+# Build Boost if requested
+
+if [ “$BUILD_BOOST” = true ]; then
+echo “”
+echo “======================================”
+echo “=== Building Boost ${BOOST_VERSION} ===”
+echo “======================================”
+cd “${BOOST_SOURCE_DIR}”
+
+```
+# Bootstrap if not already done
+if [ ! -f "./b2" ]; then
+    echo "Bootstrapping Boost..."
+    ./bootstrap.sh --prefix="${BOOST_INSTALL_DIR}" \
+        --with-libraries=program_options,iostreams,filesystem,system,regex
+fi
+
+# Build static libraries
+echo "Building Boost static libraries..."
+./b2 install \
+    --prefix="${BOOST_INSTALL_DIR}" \
+    variant=release \
+    link=static \
+    threading=multi \
+    runtime-link=shared \
+    cxxflags="-fPIC" \
+    --with-program_options \
+    --with-iostreams \
+    --with-filesystem \
+    --with-system \
+    --with-regex \
+    -j$(nproc)
+
+BOOST_DIR="${BOOST_INSTALL_DIR}"
+echo "✓ Boost built and installed to: ${BOOST_INSTALL_DIR}"
+```
+
+else
+BOOST_DIR=”${BOOST_SOURCE_DIR}”
+echo “Using existing Boost at: ${BOOST_DIR}”
+fi
+
+# Build Snappy if requested
+
+if [ “$BUILD_SNAPPY” = true ]; then
+echo “”
+echo “======================================”
+echo “=== Building Snappy ===”
+echo “======================================”
+
+```
+# Check if SNAPPY_DIR is a source directory
+if [ -f "${SNAPPY_DIR}/CMakeLists.txt" ] || [ -f "${SNAPPY_DIR}/snappy.cc" ]; then
+    echo "Building Snappy from source..."
+    mkdir -p "${SNAPPY_DIR}/build-static"
+    cd "${SNAPPY_DIR}/build-static"
+    
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="${SNAPPY_INSTALL_DIR}" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DSNAPPY_BUILD_TESTS=OFF \
+        -DSNAPPY_BUILD_BENCHMARKS=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    
+    make -j$(nproc)
+    make install
+    
+    SNAPPY_DIR="${SNAPPY_INSTALL_DIR}"
+    echo "✓ Snappy built and installed to: ${SNAPPY_INSTALL_DIR}"
+else
+    echo "ERROR: SNAPPY_DIR does not appear to be a source directory: ${SNAPPY_DIR}"
+    echo "Cannot build Snappy. Use --snappy-dir with path to Snappy source."
+    exit 1
+fi
+```
+
+else
+echo “Using existing Snappy at: ${SNAPPY_DIR}”
+fi
+
+# Determine library paths
+
+BOOST_LIB_DIR=”${BOOST_DIR}/lib”
+if [ -d “${BOOST_DIR}/stage/lib” ] && [ “$BUILD_BOOST” = false ]; then
+BOOST_LIB_DIR=”${BOOST_DIR}/stage/lib”
+fi
+
+SNAPPY_LIB_DIR=”${SNAPPY_DIR}/lib”
+if [ -d “${SNAPPY_DIR}/lib64” ]; then
+SNAPPY_LIB_DIR=”${SNAPPY_DIR}/lib64”
+fi
+
+SNAPPY_INCLUDE_DIR=”${SNAPPY_DIR}/include”
+
+# Verify static libraries exist
+
+echo “”
+echo “=== Verifying static libraries ===”
+
+REQUIRED_BOOST_LIBS=(
+“libboost_program_options.a”
+“libboost_iostreams.a”
+“libboost_filesystem.a”
+“libboost_system.a”
+)
+
+for lib in “${REQUIRED_BOOST_LIBS[@]}”; do
+if [ ! -f “${BOOST_LIB_DIR}/${lib}” ]; then
+echo “ERROR: Required Boost static library not found: ${BOOST_LIB_DIR}/${lib}”
+echo “Try running with –build-boost flag”
+exit 1
+else
+echo “✓ Found ${lib}”
+fi
+done
+
+if [ ! -f “${SNAPPY_LIB_DIR}/libsnappy.a” ]; then
+echo “ERROR: Snappy static library not found: ${SNAPPY_LIB_DIR}/libsnappy.a”
+echo “Try running with –build-snappy flag”
+exit 1
+else
+echo “✓ Found libsnappy.a”
+fi
+
+if [ ! -f “${SNAPPY_INCLUDE_DIR}/snappy.h” ]; then
+echo “ERROR: Snappy headers not found in: ${SNAPPY_INCLUDE_DIR}”
+exit 1
+else
+echo “✓ Found snappy.h”
+fi
+
+# Build Avro
+
+echo “”
+echo “======================================”
+echo “=== Building Avro ${AVRO_VERSION} ===”
+echo “======================================”
+cd “${AVRO_SOURCE_DIR}/lang/c++”
+rm -rf build-static
+mkdir -p build-static
+cd build-static
+
+# Create installation directory
+
+mkdir -p “${INSTALL_PREFIX}”
+
+# Set up compiler flags for static linking
+
+export CXXFLAGS=”-fPIC”
+export LDFLAGS=”-static-libgcc -static-libstdc++”
+
+echo “”
+echo “Configuration:”
+echo “  Boost: ${BOOST_DIR}”
+echo “  Snappy: ${SNAPPY_DIR}”
+echo “  Install: ${INSTALL_PREFIX}”
+echo “”
+
+# Configure CMake with static libraries
+
+cmake ..   
+-DCMAKE_BUILD_TYPE=Release   
+-DCMAKE_INSTALL_PREFIX=”${INSTALL_PREFIX}”   
+-DBOOST_ROOT=”${BOOST_DIR}”   
+-DBoost_NO_SYSTEM_PATHS=ON   
+-DBoost_NO_BOOST_CMAKE=ON   
+-DBoost_USE_STATIC_LIBS=ON   
+-DBoost_USE_STATIC_RUNTIME=OFF   
+-DBOOST_INCLUDEDIR=”${BOOST_DIR}/include”   
+-DBOOST_LIBRARYDIR=”${BOOST_LIB_DIR}”   
+-DSnappy_INCLUDE_DIR=”${SNAPPY_INCLUDE_DIR}”   
+-DSnappy_LIBRARY=”${SNAPPY_LIB_DIR}/libsnappy.a”   
+-DCMAKE_CXX_STANDARD=11   
+-DCMAKE_CXX_FLAGS=”${CXXFLAGS}”   
+-DCMAKE_EXE_LINKER_FLAGS=”${LDFLAGS}”   
+-DCMAKE_SHARED_LINKER_FLAGS=”${LDFLAGS}”   
+-DBUILD_SHARED_LIBS=ON
+
+echo “”
+echo “Building Avro…”
+make -j$(nproc)
+
+echo “”
+echo “Installing Avro…”
+make install
+
+# Verify the binaries
+
+echo “”
+echo “======================================”
+echo “=== Verifying static linkage ===”
+echo “======================================”
+if [ -f “${INSTALL_PREFIX}/bin/avrogencpp” ]; then
+echo “avrogencpp dependencies:”
+ldd “${INSTALL_PREFIX}/bin/avrogencpp” || true
+echo “”
+
+```
+# Check that boost and snappy are NOT in the ldd output
+BOOST_LINKED=$(ldd "${INSTALL_PREFIX}/bin/avrogencpp" | grep -c "libboost" || true)
+SNAPPY_LINKED=$(ldd "${INSTALL_PREFIX}/bin/avrogencpp" | grep -c "libsnappy" || true)
+
+if [ "$BOOST_LINKED" -gt 0 ]; then
+    echo "⚠ WARNING: avrogencpp appears to be dynamically linked to Boost"
+else
+    echo "✓ Boost is statically linked"
+fi
+
+if [ "$SNAPPY_LINKED" -gt 0 ]; then
+    echo "⚠ WARNING: avrogencpp appears to be dynamically linked to Snappy"
+else
+    echo "✓ Snappy is statically linked"
+fi
+```
+
+else
+echo “WARNING: avrogencpp binary not found”
+fi
+
+# Create README
+
+cat > “${INSTALL_PREFIX}/README.txt” << EOF
+Avro C++ ${AVRO_VERSION} - RHEL9 x86_64 (Statically Linked)
+
+This build has Boost ${BOOST_VERSION} and Snappy statically linked.
+No external dependencies required beyond standard system libraries.
+
+Installation:
+
+1. Extract this archive to your desired location
+1. Set environment variables:
+   export AVRO_HOME=/path/to/avro-${AVRO_VERSION}
+   export PATH=${AVRO_HOME}/bin:${PATH}
+   export LD_LIBRARY_PATH=${AVRO_HOME}/lib:${LD_LIBRARY_PATH}
+
+Usage:
+avrogencpp -h
+
+Verification:
+ldd ${AVRO_HOME}/bin/avrogencpp
+
+Should show only system libraries, NO boost or snappy dependencies.
+
+Build Date: $(date)
+Built on: $(uname -a)
+EOF
+
+# Skip packaging if requested
+
+if [ “$SKIP_PACKAGE” = true ]; then
+echo “”
+echo “======================================”
+echo “=== BUILD COMPLETE (No Package) ===”
+echo “======================================”
+echo “”
+echo “Avro installed to: ${INSTALL_PREFIX}”
+echo “”
+echo “To use immediately:”
+echo “  export AVRO_HOME=${INSTALL_PREFIX}”
+echo “  export PATH=${AVRO_HOME}/bin:${PATH}”
+echo “  export LD_LIBRARY_PATH=${AVRO_HOME}/lib:${LD_LIBRARY_PATH}”
+echo “”
+echo “Verify:”
+echo “  ldd ${INSTALL_PREFIX}/bin/avrogencpp”
+echo “”
+exit 0
+fi
+
+# Create package
+
+echo “”
+echo “======================================”
+echo “=== Creating package ===”
+echo “======================================”
+
+PACKAGE_NAME=“avro-${AVRO_VERSION}-static-rhel9-x86_64.tar.gz”
+cd “$(dirname ${INSTALL_PREFIX})”
+tar czf “${PACKAGE_OUTPUT_DIR}/${PACKAGE_NAME}”   
+–transform “s,^$(basename ${INSTALL_PREFIX}),avro-${AVRO_VERSION},”   
+“$(basename ${INSTALL_PREFIX})”
+
+# Generate checksum
+
+cd “${PACKAGE_OUTPUT_DIR}”
+sha256sum “${PACKAGE_NAME}” > “${PACKAGE_NAME}.sha256”
+
+# Create deployment script
+
+cat > “${PACKAGE_OUTPUT_DIR}/install-avro-static.sh” << ‘INSTALL_EOF’
+#!/bin/bash
+set -e
+
+INSTALL_PREFIX=”/opt/custom-libs”
+PACKAGE_NAME=“avro-1.10.2-static-rhel9-x86_64.tar.gz”
+
+if [ “$1” != “” ]; then
+INSTALL_PREFIX=”$1”
+fi
+
+echo “Installing Avro to: ${INSTALL_PREFIX}”
+mkdir -p “${INSTALL_PREFIX}”
+cd “${INSTALL_PREFIX}”
+
+if [ -f “${PACKAGE_NAME}” ]; then
+tar xzf “${PACKAGE_NAME}”
+rm “${PACKAGE_NAME}”
+echo “”
+echo “Installation complete!”
+echo “”
+echo “To use Avro, add to your ~/.bashrc:”
+echo “”
+echo “export AVRO_HOME=${INSTALL_PREFIX}/avro-1.10.2”
+echo “export PATH=${AVRO_HOME}/bin:${PATH}”
+echo “export LD_LIBRARY_PATH=${AVRO_HOME}/lib:${LD_LIBRARY_PATH}”
+echo “”
+echo “Then verify: avrogencpp -h”
+else
+echo “ERROR: Package not found: ${PACKAGE_NAME}”
+exit 1
+fi
+INSTALL_EOF
+
+chmod +x “${PACKAGE_OUTPUT_DIR}/install-avro-static.sh”
+
+# Summary
+
+echo “”
+echo “======================================”
+echo “=== BUILD COMPLETE ===”
+echo “======================================”
+echo “”
+echo “Package: ${PACKAGE_OUTPUT_DIR}/${PACKAGE_NAME}”
+echo “Checksum: ${PACKAGE_OUTPUT_DIR}/${PACKAGE_NAME}.sha256”
+echo “Installer: ${PACKAGE_OUTPUT_DIR}/install-avro-static.sh”
+echo “”
+ls -lh “${PACKAGE_OUTPUT_DIR}”
+echo “”
+echo “Installation verification:”
+echo “  tar xzf ${PACKAGE_NAME}”
+echo “  ldd avro-${AVRO_VERSION}/bin/avrogencpp”
+echo “  (Should NOT show boost or snappy dependencies)”
