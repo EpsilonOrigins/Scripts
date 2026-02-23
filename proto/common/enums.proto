@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package common;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.common";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle — shared across every controllable item (assets, sim runs, etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+enum LifecycleState {
+  LIFECYCLE_STATE_UNSPECIFIED  = 0;
+  LIFECYCLE_STATE_CREATED      = 1;
+  LIFECYCLE_STATE_INITIALIZING = 2;
+  LIFECYCLE_STATE_INITIALIZED  = 3;
+  LIFECYCLE_STATE_STARTING     = 4;
+  LIFECYCLE_STATE_RUNNING      = 5;
+  LIFECYCLE_STATE_STOPPING     = 6;
+  LIFECYCLE_STATE_STOPPED      = 7;
+  LIFECYCLE_STATE_ERROR        = 8;
+  LIFECYCLE_STATE_DESTROYED    = 9;
+}
+
+enum LifecycleCommand {
+  LIFECYCLE_COMMAND_UNSPECIFIED = 0;
+  LIFECYCLE_COMMAND_INITIALIZE = 1;
+  LIFECYCLE_COMMAND_START      = 2;
+  LIFECYCLE_COMMAND_STOP       = 3;
+  LIFECYCLE_COMMAND_RESET      = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Health
+// ─────────────────────────────────────────────────────────────────────────────
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY     = 1;
+  HEALTH_STATUS_DEGRADED    = 2;
+  HEALTH_STATUS_UNHEALTHY   = 3;
+  HEALTH_STATUS_UNKNOWN     = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Severity — reused by notifications, logs, broadcast alerts
+// ─────────────────────────────────────────────────────────────────────────────
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_DEBUG       = 1;
+  SEVERITY_INFO        = 2;
+  SEVERITY_WARNING     = 3;
+  SEVERITY_ERROR       = 4;
+  SEVERITY_CRITICAL    = 5;
+}

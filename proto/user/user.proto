@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package user;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.user";
+
+import "google/protobuf/timestamp.proto";
+import "common/header.proto";
+import "common/enums.proto";
+import "entity/entity.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User — an entity that receives notifications and can subscribe to topics.
+// ─────────────────────────────────────────────────────────────────────────────
+message User {
+  entity.Entity   entity = 1; // base identity (type = "user")
+  string          email  = 2;
+  string          role   = 3; // e.g. "operator", "observer", "admin"
+  repeated string subscribed_topics = 4; // notification routing
+  UserPreferences preferences       = 5;
+}
+
+message UserPreferences {
+  bool   receive_health_alerts   = 1;
+  bool   receive_sim_broadcasts  = 2;
+  bool   receive_entity_events   = 3;
+  repeated common.Severity min_severity_filter = 4; // only deliver these+
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications  (direction: SIM_TO_CLIENT, streamed to the user)
+// ─────────────────────────────────────────────────────────────────────────────
+enum NotificationType {
+  NOTIFICATION_TYPE_UNSPECIFIED     = 0;
+  NOTIFICATION_TYPE_HEALTH_ALERT   = 1;
+  NOTIFICATION_TYPE_ENTITY_EVENT   = 2;
+  NOTIFICATION_TYPE_SIM_BROADCAST  = 3;
+  NOTIFICATION_TYPE_SYSTEM         = 4;
+  NOTIFICATION_TYPE_CUSTOM         = 5;
+}
+
+message Notification {
+  common.MessageHeader header       = 1; // direction = SIM_TO_CLIENT
+  string               user_id      = 2; // target user
+  NotificationType     type         = 3;
+  common.Severity      severity     = 4;
+  string               title        = 5;
+  string               body         = 6;
+  string               source_entity_id = 7; // what triggered it
+  bool                 read         = 8;
+  google.protobuf.Timestamp expires_at = 9; // auto-dismiss after this
+}
+
+// Subscribe request — opens a server-streaming channel of notifications
+message SubscribeNotificationsRequest {
+  common.MessageHeader     header   = 1;
+  string                   user_id  = 2;
+  repeated NotificationType types   = 3; // empty = all
+  repeated common.Severity  min_severity = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Acknowledge  (direction: CLIENT_TO_SIM)
+// ─────────────────────────────────────────────────────────────────────────────
+message AcknowledgeNotificationRequest {
+  common.MessageHeader header          = 1;
+  string               notification_id = 2;
+  string               user_id         = 3;
+}
+
+message AcknowledgeNotificationResponse {
+  common.MessageHeader header  = 1;
+  bool                 success = 2;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Send a notification to one or more users  (direction: CLIENT_TO_SIM)
+// e.g. an operator sends an alert to all observers
+// ─────────────────────────────────────────────────────────────────────────────
+message SendNotificationRequest {
+  common.MessageHeader header          = 1;
+  repeated string      target_user_ids = 2; // empty = broadcast to all
+  NotificationType     type            = 3;
+  common.Severity      severity        = 4;
+  string               title           = 5;
+  string               body            = 6;
+}
+
+message SendNotificationResponse {
+  common.MessageHeader header         = 1;
+  int32                delivered_count = 2;
+}

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package common;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.common";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MessageDirection — declares the intended flow of a message so that
+// gateways, routers, and code-generators can enforce directionality.
+// ─────────────────────────────────────────────────────────────────────────────
+enum MessageDirection {
+  MESSAGE_DIRECTION_UNSPECIFIED    = 0;
+  MESSAGE_DIRECTION_CLIENT_TO_SIM = 1; // commands, requests
+  MESSAGE_DIRECTION_SIM_TO_CLIENT = 2; // telemetry, health, broadcasts
+  MESSAGE_DIRECTION_BIDIRECTIONAL = 3; // streaming updates, sync
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MessageHeader — every message in the system carries this header so that
+// routing, tracing, and replay are possible without inspecting the payload.
+// ─────────────────────────────────────────────────────────────────────────────
+message MessageHeader {
+  string            message_id    = 1; // UUID — unique per message
+  string            correlation_id = 2; // ties request ↔ response pairs
+  string            source_id     = 3; // originating entity / service
+  string            target_id     = 4; // destination entity / service (empty = broadcast)
+  MessageDirection  direction     = 5;
+  google.protobuf.Timestamp timestamp = 6;
+  map<string, string> metadata    = 7; // extensible key-value bag
+}

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package user;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.user";
+
+import "user/user.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UserService
+//
+// Direction key:
+//   SendNotification / Acknowledge → client-to-sim (unary)
+//   SubscribeNotifications         → sim-to-client  (server-streaming)
+// ─────────────────────────────────────────────────────────────────────────────
+service UserService {
+
+  // ── Push a notification to users (client → sim) ──────────────────────────
+  rpc SendNotification (SendNotificationRequest) returns (SendNotificationResponse);
+
+  // ── Mark a notification read (client → sim) ──────────────────────────────
+  rpc AcknowledgeNotification (AcknowledgeNotificationRequest)
+      returns (AcknowledgeNotificationResponse);
+
+  // ── Live notification stream (sim → client) ──────────────────────────────
+  rpc SubscribeNotifications (SubscribeNotificationsRequest)
+      returns (stream Notification);
+}

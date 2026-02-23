@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package entity;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.entity";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto";
+import "common/header.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity — the base record every domain object (asset, user, sim-run) embeds.
+// Provides identity, ownership, audit timestamps, and an extensible property
+// bag so domain layers never need to fork the base schema.
+// ─────────────────────────────────────────────────────────────────────────────
+message Entity {
+  string id           = 1; // UUID
+  string name         = 2;
+  string type         = 3; // e.g. "asset", "user", "simulation_run"
+  string parent_id    = 4; // hierarchy link — empty for root entities
+  string owner_id     = 5;
+
+  google.protobuf.Timestamp created_at  = 6;
+  google.protobuf.Timestamp updated_at  = 7;
+
+  map<string, string>       labels      = 8; // free-form tags
+  google.protobuf.Struct    properties  = 9; // arbitrary nested attributes
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRUD request / response pairs  (direction: CLIENT_TO_SIM → SIM_TO_CLIENT)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// — Create —
+message CreateEntityRequest {
+  common.MessageHeader header  = 1; // direction = CLIENT_TO_SIM
+  Entity               entity  = 2;
+}
+
+message CreateEntityResponse {
+  common.MessageHeader header  = 1; // direction = SIM_TO_CLIENT
+  Entity               entity  = 2;
+}
+
+// — Get —
+message GetEntityRequest {
+  common.MessageHeader header     = 1;
+  string               entity_id  = 2;
+}
+
+message GetEntityResponse {
+  common.MessageHeader header  = 1;
+  Entity               entity  = 2;
+}
+
+// — Update (partial) —
+message UpdateEntityRequest {
+  common.MessageHeader   header      = 1;
+  string                 entity_id   = 2;
+  google.protobuf.Struct patch       = 3; // sparse merge-patch
+  map<string, string>    label_patch = 4; // merge into labels
+}
+
+message UpdateEntityResponse {
+  common.MessageHeader header  = 1;
+  Entity               entity  = 2;
+}
+
+// — Remove (soft-delete / detach from hierarchy) —
+message RemoveEntityRequest {
+  common.MessageHeader header     = 1;
+  string               entity_id  = 2;
+}
+
+message RemoveEntityResponse {
+  common.MessageHeader header   = 1;
+  bool                 success  = 2;
+}
+
+// — Destroy (hard-delete) —
+message DestroyEntityRequest {
+  common.MessageHeader header     = 1;
+  string               entity_id  = 2;
+  bool                 cascade    = 3; // also destroy children
+}
+
+message DestroyEntityResponse {
+  common.MessageHeader header           = 1;
+  bool                 success          = 2;
+  int32                children_removed = 3;
+}
+
+// — List (children of a parent or top-level) —
+message ListEntitiesRequest {
+  common.MessageHeader header    = 1;
+  string               parent_id = 2; // empty = list roots
+  string               type      = 3; // filter by entity type
+  int32                page_size = 4;
+  string               page_token = 5;
+}
+
+message ListEntitiesResponse {
+  common.MessageHeader header          = 1;
+  repeated Entity      entities        = 2;
+  string               next_page_token = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EntityUpdate — pushed from server whenever an entity changes
+// (direction: SIM_TO_CLIENT, streamed)
+// ─────────────────────────────────────────────────────────────────────────────
+enum EntityEventType {
+  ENTITY_EVENT_TYPE_UNSPECIFIED = 0;
+  ENTITY_EVENT_TYPE_CREATED     = 1;
+  ENTITY_EVENT_TYPE_UPDATED     = 2;
+  ENTITY_EVENT_TYPE_REMOVED     = 3;
+  ENTITY_EVENT_TYPE_DESTROYED   = 4;
+}
+
+message EntityEvent {
+  common.MessageHeader header     = 1; // direction = SIM_TO_CLIENT
+  EntityEventType      event_type = 2;
+  Entity               entity     = 3; // snapshot after mutation
+}
+
+// Subscription filter for the watch stream
+message WatchEntitiesRequest {
+  common.MessageHeader   header     = 1;
+  repeated string        entity_ids = 2; // empty = watch all
+  repeated string        types      = 3; // filter by type
+  string                 parent_id  = 4; // scope to subtree
+}

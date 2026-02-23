@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package asset;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.asset";
+
+import "asset/asset.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AssetService
+//
+// Direction key:
+//   SendCommand / BatchCommand  → client-to-sim  (unary)
+//   WatchHealth / Telemetry     → sim-to-client   (server-streaming)
+//   CommandStream               → bidirectional   (client sends commands,
+//                                                   server streams state)
+// ─────────────────────────────────────────────────────────────────────────────
+service AssetService {
+
+  // ── Lifecycle commands (client → sim) ────────────────────────────────────
+  rpc SendCommand  (AssetCommandRequest)      returns (AssetCommandResponse);
+  rpc BatchCommand (BatchAssetCommandRequest) returns (BatchAssetCommandResponse);
+
+  // ── Health stream (sim → client) ─────────────────────────────────────────
+  rpc WatchHealth (WatchHealthRequest) returns (stream HealthReport);
+
+  // ── Telemetry stream (sim → client) ──────────────────────────────────────
+  rpc WatchTelemetry (WatchTelemetryRequest) returns (stream AssetTelemetry);
+
+  // ── Bidirectional command channel ────────────────────────────────────────
+  // Client streams commands; server streams back state transitions and
+  // acknowledgements in real time.  Useful for interactive / HITL control.
+  rpc CommandStream (stream AssetCommandRequest) returns (stream AssetCommandResponse);
+}

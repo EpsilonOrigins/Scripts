@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package simulation;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.simulation";
+
+import "simulation/simulation.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SimulationService
+//
+// Direction key:
+//   SendCommand / PublishBroadcast → client-to-sim (unary)
+//   WatchState / Broadcasts        → sim-to-client  (server-streaming)
+//   CommandStream                  → bidirectional  (interactive control)
+// ─────────────────────────────────────────────────────────────────────────────
+service SimulationService {
+
+  // ── Run control (client → sim) ───────────────────────────────────────────
+  rpc SendCommand (SimCommandRequest) returns (SimCommandResponse);
+
+  // ── Simulation state stream (sim → client) ───────────────────────────────
+  rpc WatchState (WatchSimStateRequest) returns (stream SimStateUpdate);
+
+  // ── Broadcast subscription (sim → client) ────────────────────────────────
+  rpc SubscribeBroadcasts (SubscribeBroadcastsRequest)
+      returns (stream BroadcastMessage);
+
+  // ── Publish a broadcast (client → sim, relayed to subscribers) ───────────
+  rpc PublishBroadcast (PublishBroadcastRequest)
+      returns (PublishBroadcastResponse);
+
+  // ── Bidirectional command channel ────────────────────────────────────────
+  // Mirrors AssetService.CommandStream — the client streams commands and
+  // the server streams back state transitions, enabling real-time HITL
+  // simulation control.
+  rpc CommandStream (stream SimCommandRequest) returns (stream SimCommandResponse);
+}

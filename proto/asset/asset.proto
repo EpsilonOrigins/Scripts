@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package asset;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.asset";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "common/header.proto";
+import "common/enums.proto";
+import "entity/entity.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Asset — an entity that is controllable (start/stop/init) and reports health.
+// Inherits identity & CRUD from Entity; adds domain-specific fields.
+// ─────────────────────────────────────────────────────────────────────────────
+message Asset {
+  entity.Entity          entity          = 1; // base identity (type = "asset")
+  common.LifecycleState  lifecycle_state = 2;
+  common.HealthStatus    health_status   = 3;
+  string                 model_uri       = 4; // simulation model reference
+  AssetConfiguration     configuration   = 5;
+}
+
+message AssetConfiguration {
+  google.protobuf.Struct parameters          = 1; // model-specific tuning
+  google.protobuf.Duration health_interval   = 2; // how often health is reported
+  bool                     auto_restart      = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle commands  (direction: CLIENT_TO_SIM)
+// ─────────────────────────────────────────────────────────────────────────────
+message AssetCommandRequest {
+  common.MessageHeader    header    = 1; // direction = CLIENT_TO_SIM
+  string                  asset_id  = 2;
+  common.LifecycleCommand command   = 3;
+  google.protobuf.Struct  params    = 4; // command-specific payload
+}
+
+message AssetCommandResponse {
+  common.MessageHeader   header          = 1; // direction = SIM_TO_CLIENT
+  string                 asset_id        = 2;
+  common.LifecycleState  previous_state  = 3;
+  common.LifecycleState  current_state   = 4;
+  bool                   accepted        = 5;
+  string                 rejection_reason = 6;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Health  (direction: SIM_TO_CLIENT, streamed from the asset)
+// ─────────────────────────────────────────────────────────────────────────────
+message HealthReport {
+  common.MessageHeader        header        = 1; // direction = SIM_TO_CLIENT
+  string                      asset_id      = 2;
+  common.HealthStatus         status        = 3;
+  google.protobuf.Timestamp   checked_at    = 4;
+  repeated HealthMetric       metrics       = 5;
+  string                      message       = 6;
+}
+
+message HealthMetric {
+  string  name      = 1; // e.g. "cpu_percent", "memory_mb"
+  double  value     = 2;
+  string  unit      = 3;
+  double  threshold = 4; // above this → degraded / unhealthy
+}
+
+// Subscription for health stream
+message WatchHealthRequest {
+  common.MessageHeader header     = 1;
+  repeated string      asset_ids  = 2; // empty = all assets
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Asset telemetry  (direction: SIM_TO_CLIENT, streamed)
+// Simulation assets push periodic state snapshots.
+// ─────────────────────────────────────────────────────────────────────────────
+message AssetTelemetry {
+  common.MessageHeader      header     = 1; // direction = SIM_TO_CLIENT
+  string                    asset_id   = 2;
+  google.protobuf.Timestamp sampled_at = 3;
+  google.protobuf.Struct    data       = 4; // model-specific KV pairs
+}
+
+message WatchTelemetryRequest {
+  common.MessageHeader header    = 1;
+  repeated string      asset_ids = 2;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch commands  (direction: CLIENT_TO_SIM → SIM_TO_CLIENT)
+// Control multiple assets at once (e.g. start an entire formation).
+// ─────────────────────────────────────────────────────────────────────────────
+message BatchAssetCommandRequest {
+  common.MessageHeader           header   = 1;
+  repeated AssetCommandRequest   commands = 2;
+}
+
+message BatchAssetCommandResponse {
+  common.MessageHeader            header    = 1;
+  repeated AssetCommandResponse   results   = 2;
+}

@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package simulation;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.simulation";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "common/header.proto";
+import "common/enums.proto";
+import "entity/entity.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SimulationRun — a controllable entity that orchestrates a set of assets.
+// Shares the same LifecycleCommand vocabulary (initialize/start/stop/reset)
+// used by assets, so a single control plane can manage both.
+// ─────────────────────────────────────────────────────────────────────────────
+message SimulationRun {
+  entity.Entity          entity          = 1; // base identity (type = "simulation_run")
+  common.LifecycleState  lifecycle_state = 2;
+  SimulationConfig       config          = 3;
+  SimulationClock        clock           = 4;
+  repeated string        asset_ids       = 5; // participating assets
+}
+
+message SimulationConfig {
+  string                     scenario_uri      = 1;
+  google.protobuf.Duration   time_step         = 2;
+  double                     time_scale        = 3; // 1.0 = real-time
+  google.protobuf.Duration   max_duration      = 4;
+  google.protobuf.Struct     scenario_params   = 5;
+}
+
+message SimulationClock {
+  google.protobuf.Timestamp sim_time     = 1; // current simulation time
+  google.protobuf.Timestamp wall_time    = 2; // real wall clock
+  double                    time_scale   = 3; // effective ratio
+  bool                      paused       = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Run control  (direction: CLIENT_TO_SIM)
+// Reuses LifecycleCommand so the control vocabulary is consistent with assets.
+// ─────────────────────────────────────────────────────────────────────────────
+message SimCommandRequest {
+  common.MessageHeader    header  = 1; // direction = CLIENT_TO_SIM
+  string                  run_id  = 2;
+  common.LifecycleCommand command = 3;
+  google.protobuf.Struct  params  = 4;
+}
+
+message SimCommandResponse {
+  common.MessageHeader   header          = 1; // direction = SIM_TO_CLIENT
+  string                 run_id          = 2;
+  common.LifecycleState  previous_state  = 3;
+  common.LifecycleState  current_state   = 4;
+  bool                   accepted        = 5;
+  string                 rejection_reason = 6;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simulation state stream  (direction: SIM_TO_CLIENT, server-streaming)
+// Pushes clock ticks and lifecycle transitions to observers.
+// ─────────────────────────────────────────────────────────────────────────────
+message SimStateUpdate {
+  common.MessageHeader  header          = 1;
+  string                run_id          = 2;
+  common.LifecycleState lifecycle_state = 3;
+  SimulationClock       clock           = 4;
+}
+
+message WatchSimStateRequest {
+  common.MessageHeader header  = 1;
+  repeated string      run_ids = 2; // empty = all runs
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Broadcast messages  (direction: SIM_TO_CLIENT, server-streaming)
+// Assets and the simulation engine emit broadcast messages that reach all
+// subscribed users.  These carry structured payloads so consumers can
+// filter, display, or forward them.
+// ─────────────────────────────────────────────────────────────────────────────
+enum BroadcastChannel {
+  BROADCAST_CHANNEL_UNSPECIFIED = 0;
+  BROADCAST_CHANNEL_SYSTEM      = 1; // sim engine messages
+  BROADCAST_CHANNEL_ASSET       = 2; // asset-originated events
+  BROADCAST_CHANNEL_OPERATOR    = 3; // operator announcements
+  BROADCAST_CHANNEL_ALERT       = 4; // high-priority alerts
+}
+
+message BroadcastMessage {
+  common.MessageHeader      header       = 1; // direction = SIM_TO_CLIENT
+  string                    run_id       = 2;
+  string                    source_asset_id = 3; // empty if from sim engine
+  BroadcastChannel          channel      = 4;
+  common.Severity           severity     = 5;
+  string                    topic        = 6;
+  string                    text         = 7; // human-readable summary
+  google.protobuf.Struct    payload      = 8; // machine-readable detail
+  google.protobuf.Timestamp sim_time     = 9; // when it occurred in sim
+}
+
+message SubscribeBroadcastsRequest {
+  common.MessageHeader      header   = 1;
+  repeated string           run_ids  = 2; // empty = all runs
+  repeated BroadcastChannel channels = 3; // empty = all channels
+  repeated common.Severity  min_severity = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Publish a broadcast (from an asset or operator)
+// direction: CLIENT_TO_SIM (or asset-internal → sim engine relays)
+// ─────────────────────────────────────────────────────────────────────────────
+message PublishBroadcastRequest {
+  common.MessageHeader   header       = 1;
+  string                 run_id       = 2;
+  string                 source_asset_id = 3;
+  BroadcastChannel       channel      = 4;
+  common.Severity        severity     = 5;
+  string                 topic        = 6;
+  string                 text         = 7;
+  google.protobuf.Struct payload      = 8;
+}
+
+message PublishBroadcastResponse {
+  common.MessageHeader header     = 1;
+  string               message_id = 2; // assigned broadcast ID
+}

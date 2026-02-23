@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package entity;
+
+option java_multiple_files = true;
+option java_package = "com.sim.proto.entity";
+
+import "entity/entity.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EntityService — full CRUD plus a server-push watch stream.
+//
+// Direction key:
+//   unary   → client-to-sim request, sim-to-client response
+//   stream  → sim-to-client (server streaming)
+// ─────────────────────────────────────────────────────────────────────────────
+service EntityService {
+
+  // ── CRUD (client → sim → client) ─────────────────────────────────────────
+  rpc CreateEntity  (CreateEntityRequest)  returns (CreateEntityResponse);
+  rpc GetEntity     (GetEntityRequest)     returns (GetEntityResponse);
+  rpc UpdateEntity  (UpdateEntityRequest)  returns (UpdateEntityResponse);
+  rpc RemoveEntity  (RemoveEntityRequest)  returns (RemoveEntityResponse);
+  rpc DestroyEntity (DestroyEntityRequest) returns (DestroyEntityResponse);
+  rpc ListEntities  (ListEntitiesRequest)  returns (ListEntitiesResponse);
+
+  // ── Watch stream (sim → client, server-streaming) ────────────────────────
+  rpc WatchEntities (WatchEntitiesRequest) returns (stream EntityEvent);
+}
