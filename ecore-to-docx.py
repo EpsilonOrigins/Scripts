@@ -69,8 +69,10 @@ class Feature:
 class EClassInfo:
     name: str
     package: str
-    is_abstract: bool
-    is_interface: bool
+    is_abstract: bool = False
+    is_interface: bool = False
+    is_enum: bool = False
+    is_datatype: bool = False
     supertypes: list[str] = field(default_factory=list)
     description: str = ""
     features: list[Feature] = field(default_factory=list)
@@ -197,20 +199,72 @@ def parse_ecore(path: Path) -> list[EClassInfo]:
         pkg_name = pkg.get("name", path.stem)
         for classifier in pkg.findall("eClassifiers"):
             xsi_type = classifier.get(f"{{{NS['xsi']}}}type", "")
-            if not xsi_type.endswith("EClass"):
-                continue  # skip EDataType, EEnum for now
 
-            info = EClassInfo(
-                name=classifier.get("name", ""),
-                package=pkg_name,
-                is_abstract=classifier.get("abstract", "false").lower() == "true",
-                is_interface=classifier.get("interface", "false").lower() == "true",
-                supertypes=_parse_supertypes(classifier),
-                description=_extract_description(classifier),
-            )
-            for feat_elem in classifier.findall("eStructuralFeatures"):
-                info.features.append(_parse_feature(feat_elem))
-            classes.append(info)
+            if xsi_type.endswith("EClass"):
+                info = EClassInfo(
+                    name=classifier.get("name", ""),
+                    package=pkg_name,
+                    is_abstract=classifier.get("abstract", "false").lower() == "true",
+                    is_interface=classifier.get("interface", "false").lower() == "true",
+                    supertypes=_parse_supertypes(classifier),
+                    description=_extract_description(classifier),
+                )
+                for feat_elem in classifier.findall("eStructuralFeatures"):
+                    info.features.append(_parse_feature(feat_elem))
+                classes.append(info)
+
+            elif xsi_type.endswith("EEnum"):
+                info = EClassInfo(
+                    name=classifier.get("name", ""),
+                    package=pkg_name,
+                    is_enum=True,
+                    description=_extract_description(classifier),
+                )
+                # Each literal becomes a row. "Default" column holds the
+                # integer value; "Description" uses GenModel docs if present.
+                for lit in classifier.findall("eLiterals"):
+                    lit_name = lit.get("name", "")
+                    literal_str = lit.get("literal") or lit_name
+                    value = lit.get("value", "")
+                    info.features.append(Feature(
+                        name=literal_str,
+                        kind="literal",
+                        type_str="",
+                        cardinality="",
+                        default=value,
+                        description=_extract_description(lit),
+                    ))
+                classes.append(info)
+
+            elif xsi_type.endswith("EDataType"):
+                # Custom data types (usually wrapping a Java class). They
+                # have no features or literals, so we render them as a
+                # single-row "data type" block that documents what they
+                # alias to.
+                dt_name = classifier.get("name", "")
+                instance_class = (
+                    classifier.get("instanceClassName")
+                    or classifier.get("instanceTypeName")
+                    or ""
+                )
+                serializable = classifier.get("serializable", "true").lower() == "true"
+                info = EClassInfo(
+                    name=dt_name,
+                    package=pkg_name,
+                    is_datatype=True,
+                    description=_extract_description(classifier),
+                )
+                info.features.append(Feature(
+                    name=dt_name,
+                    kind="datatype",
+                    type_str=instance_class,
+                    cardinality="",
+                    default="" if serializable else "not serializable",
+                    description=_extract_description(classifier),
+                ))
+                classes.append(info)
+
+            # Other classifier kinds (if any) are still skipped.
 
     return classes
 
