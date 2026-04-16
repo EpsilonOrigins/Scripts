@@ -223,11 +223,12 @@ ROW_ALT_FILL = "F2F2F2"  # light grey zebra
 BORDER_COLOR = "BFBFBF"
 
 COLUMNS = [
-    ("Name",        Cm(3.2)),
+    ("Class",       Cm(3.0)),
+    ("Name",        Cm(3.0)),
     ("Kind",        Cm(2.2)),
     ("Type",        Cm(3.0)),
     ("Default",     Cm(2.0)),
-    ("Description", Cm(7.0)),
+    ("Description", Cm(6.0)),
 ]
 
 
@@ -267,9 +268,9 @@ def _write_cell(cell, text: str, *, bold: bool = False, italic: bool = False,
 
 
 def _add_class_heading(doc: Document, cls: EClassInfo) -> None:
-    heading = doc.add_heading(level=2)
+    heading = doc.add_heading(level=3)
     run = heading.add_run(cls.name)
-    run.font.size = Pt(14)
+    run.font.size = Pt(12)
 
     # Subtitle line with package + modifiers + supertypes
     bits = [f"Package: {cls.package}"]
@@ -290,19 +291,30 @@ def _add_class_heading(doc: Document, cls: EClassInfo) -> None:
         desc.paragraph_format.space_after = Pt(4)
 
 
-def _add_class_table(doc: Document, cls: EClassInfo) -> None:
-    if not cls.features:
+def _add_file_table(doc: Document, classes: list[EClassInfo]) -> None:
+    """
+    Render one combined table for a single .ecore file.
+    Columns: Class | Name | Kind | Type | Default | Description.
+    Each class contributes its features as rows; the Class cell shows the
+    class name only on the first row of that class's block for readability.
+    Classes with no features still get a single row so they're visible.
+    """
+    # Count total data rows so we can size the table up-front
+    total_rows = 0
+    for cls in sorted(classes, key=lambda c: c.name.lower()):
+        total_rows += max(len(cls.features), 1)
+
+    if total_rows == 0:
         note = doc.add_paragraph()
-        r = note.add_run("(No structural features defined.)")
+        r = note.add_run("(No EClasses found in this file.)")
         r.italic = True
         r.font.size = Pt(9)
         return
 
-    table = doc.add_table(rows=1 + len(cls.features), cols=len(COLUMNS))
+    table = doc.add_table(rows=1 + total_rows, cols=len(COLUMNS))
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
     table.autofit = False
 
-    # Column widths
     for i, (_, width) in enumerate(COLUMNS):
         for row in table.rows:
             row.cells[i].width = width
@@ -315,22 +327,40 @@ def _add_class_table(doc: Document, cls: EClassInfo) -> None:
         _shade_cell(cell, HEADER_FILL)
 
     # Data rows
-    for r_idx, feat in enumerate(cls.features, start=1):
-        row = table.rows[r_idx]
-        values = [
-            feat.name,
-            feat.kind,
-            feat.type_str,
-            feat.default,
-            feat.description,
-        ]
-        for c_idx, val in enumerate(values):
-            cell = row.cells[c_idx]
-            _write_cell(cell, val, size=9)
-            if r_idx % 2 == 0:
-                _shade_cell(cell, ROW_ALT_FILL)
+    r_idx = 1
+    class_block = 0  # toggles zebra shading per class block, not per row
+    for cls in sorted(classes, key=lambda c: c.name.lower()):
+        feats = cls.features if cls.features else [None]
+        shade = (class_block % 2 == 1)
+        for f_pos, feat in enumerate(feats):
+            row = table.rows[r_idx]
+            class_label = cls.name if f_pos == 0 else ""
+            if feat is None:
+                values = [class_label, "", "", "", "", "(no features)"]
+            else:
+                values = [
+                    class_label,
+                    feat.name,
+                    feat.kind,
+                    feat.type_str,
+                    feat.default,
+                    feat.description,
+                ]
+            for c_idx, val in enumerate(values):
+                cell = row.cells[c_idx]
+                is_class_col = (c_idx == 0)
+                _write_cell(
+                    cell, val,
+                    bold=(is_class_col and f_pos == 0),
+                    italic=(feat is None and c_idx == len(values) - 1),
+                    size=9,
+                )
+                if shade:
+                    _shade_cell(cell, ROW_ALT_FILL)
+            r_idx += 1
+        class_block += 1
 
-    doc.add_paragraph()  # spacing between tables
+    doc.add_paragraph()  # spacing after the table
 
 
 def build_document(
@@ -353,29 +383,33 @@ def build_document(
 
     intro = doc.add_paragraph(
         "This document defines the structural classes extracted from the provided "
-        "Ecore model(s). Each section below describes an EClass and lists its "
-        "attributes and references."
+        "Ecore model(s). Each table below corresponds to one .ecore source file "
+        "and lists every structural feature (attribute or reference) of every "
+        "EClass in that file."
     )
     intro.paragraph_format.space_after = Pt(12)
 
     for source_file, classes in classes_by_file.items():
-        if len(classes_by_file) > 1:
-            h1 = doc.add_heading(level=1)
-            h1.add_run(Path(source_file).name)
+        h1 = doc.add_heading(level=1)
+        h1.add_run(Path(source_file).name)
 
-        # Group by package for readability
-        by_package: dict[str, list[EClassInfo]] = {}
-        for cls in classes:
-            by_package.setdefault(cls.package, []).append(cls)
+        # Subtitle: the packages contained in this file
+        packages = sorted({c.package for c in classes})
+        if packages:
+            sub = doc.add_paragraph()
+            sr = sub.add_run("Package(s): " + ", ".join(packages))
+            sr.italic = True
+            sr.font.size = Pt(9)
+            sr.font.color.rgb = RGBColor(0x59, 0x59, 0x59)
 
-        for pkg_name, pkg_classes in by_package.items():
-            if len(by_package) > 1 or len(classes_by_file) > 1:
-                ph = doc.add_heading(level=1 if len(classes_by_file) == 1 else 2)
-                ph.add_run(f"Package: {pkg_name}")
+        if not classes:
+            note = doc.add_paragraph()
+            r = note.add_run("(No EClasses in this file.)")
+            r.italic = True
+            r.font.size = Pt(9)
+            continue
 
-            for cls in sorted(pkg_classes, key=lambda c: c.name.lower()):
-                _add_class_heading(doc, cls)
-                _add_class_table(doc, cls)
+        _add_file_table(doc, classes)
 
     return doc
 
