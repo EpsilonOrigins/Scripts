@@ -226,9 +226,8 @@ COLUMNS = [
     ("Name",        Cm(3.2)),
     ("Kind",        Cm(2.2)),
     ("Type",        Cm(3.0)),
-    ("Cardinality", Cm(2.0)),
     ("Default",     Cm(2.0)),
-    ("Description", Cm(5.0)),
+    ("Description", Cm(7.0)),
 ]
 
 
@@ -322,7 +321,6 @@ def _add_class_table(doc: Document, cls: EClassInfo) -> None:
             feat.name,
             feat.kind,
             feat.type_str,
-            feat.cardinality,
             feat.default,
             feat.description,
         ]
