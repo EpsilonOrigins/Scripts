@@ -18,6 +18,8 @@ EReferences) with columns:
 Usage:
     python ecore_to_docx.py model.ecore -o data_definitions.docx
     python ecore_to_docx.py *.ecore -o combined.docx
+    python ecore_to_docx.py path/to/dir -o combined.docx       # recursive
+    python ecore_to_docx.py dir1 file.ecore dir2 -o out.docx   # mixed
     python ecore_to_docx.py model.ecore --title "Data Definition Document"
 """
 
@@ -382,34 +384,77 @@ def build_document(
 
 
 # ---------------------------------------------------------------------------
+# Input expansion
+# ---------------------------------------------------------------------------
+def collect_ecore_files(inputs: list[str]) -> list[Path]:
+    """
+    Expand CLI inputs into a deduplicated, sorted list of .ecore file paths.
+    - A file path is included as-is (must end in .ecore).
+    - A directory is walked recursively for *.ecore files.
+    """
+    seen: set[Path] = set()
+    result: list[Path] = []
+
+    for raw in inputs:
+        p = Path(raw)
+        if not p.exists():
+            print(f"ERROR: path not found: {p}", file=sys.stderr)
+            sys.exit(2)
+
+        if p.is_dir():
+            found = sorted(p.rglob("*.ecore"))
+            if not found:
+                print(f"  (no .ecore files under {p})")
+            for f in found:
+                resolved = f.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    result.append(f)
+        elif p.is_file():
+            if p.suffix.lower() != ".ecore":
+                print(f"WARNING: skipping non-.ecore file: {p}", file=sys.stderr)
+                continue
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                result.append(p)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Convert .ecore file(s) into a Word document of data-definition tables."
+        description="Convert .ecore file(s) into a Word document of data-definition tables. "
+                    "Accepts individual files and/or directories (searched recursively)."
     )
-    ap.add_argument("inputs", nargs="+", help="One or more .ecore files")
+    ap.add_argument("inputs", nargs="+",
+                    help="One or more .ecore files and/or directories to search recursively")
     ap.add_argument("-o", "--output", default="ecore_tables.docx",
                     help="Output .docx path (default: ecore_tables.docx)")
     ap.add_argument("--title", default="Data Definitions",
                     help="Document title (default: 'Data Definitions')")
     args = ap.parse_args()
 
+    files = collect_ecore_files(args.inputs)
+    if not files:
+        print("No .ecore files found.", file=sys.stderr)
+        return 1
+
+    print(f"Found {len(files)} .ecore file(s):")
     classes_by_file: dict[str, list[EClassInfo]] = {}
     total = 0
-    for raw in args.inputs:
-        p = Path(raw)
-        if not p.exists():
-            print(f"ERROR: file not found: {p}", file=sys.stderr)
-            return 2
+    for p in files:
         try:
             classes = parse_ecore(p)
         except ET.ParseError as e:
-            print(f"ERROR: could not parse {p}: {e}", file=sys.stderr)
-            return 2
+            print(f"  ERROR parsing {p}: {e}", file=sys.stderr)
+            continue
         classes_by_file[str(p)] = classes
         total += len(classes)
-        print(f"  {p.name}: {len(classes)} EClass(es)")
+        print(f"  {p}: {len(classes)} EClass(es)")
 
     if total == 0:
         print("No EClasses found in the provided file(s).", file=sys.stderr)
