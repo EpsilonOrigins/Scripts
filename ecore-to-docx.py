@@ -33,7 +33,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
-
 from docx import Document
 from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
@@ -386,11 +385,46 @@ def build_document(
 # ---------------------------------------------------------------------------
 # Input expansion
 # ---------------------------------------------------------------------------
+def _walk_for_ecore(root: Path) -> list[Path]:
+    """
+    Recursively find *.ecore files under `root`, skipping subdirectories we
+    don't have permission to read instead of aborting the whole walk.
+    `os.walk` with onerror lets us log and continue; `rglob` would raise.
+    """
+    found: list[Path] = []
+
+    def _on_error(err: OSError) -> None:
+        # err.filename is the path that couldn't be read
+        print(f"  WARNING: skipping unreadable path: {err.filename} "
+              f"({err.strerror or err})", file=sys.stderr)
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_on_error,
+                                                followlinks=False):
+        # Proactively skip common Windows protected/system dirs that we
+        # definitely don't want to descend into (and which would otherwise
+        # trigger PermissionError and noise up the output).
+        dirnames[:] = [
+            d for d in dirnames
+            if d.lower() not in {
+                "system volume information",
+                "$recycle.bin",
+                ".git",
+                "node_modules",
+            }
+        ]
+        for fn in filenames:
+            if fn.lower().endswith(".ecore"):
+                found.append(Path(dirpath) / fn)
+
+    return sorted(found)
+
+
 def collect_ecore_files(inputs: list[str]) -> list[Path]:
     """
     Expand CLI inputs into a deduplicated, sorted list of .ecore file paths.
     - A file path is included as-is (must end in .ecore).
-    - A directory is walked recursively for *.ecore files.
+    - A directory is walked recursively for *.ecore files, skipping any
+      subdirectory we lack permission to read.
     """
     seen: set[Path] = set()
     result: list[Path] = []
@@ -402,11 +436,20 @@ def collect_ecore_files(inputs: list[str]) -> list[Path]:
             sys.exit(2)
 
         if p.is_dir():
-            found = sorted(p.rglob("*.ecore"))
+            try:
+                found = _walk_for_ecore(p)
+            except PermissionError as e:
+                # The top-level directory itself is unreadable.
+                print(f"ERROR: cannot read directory {p}: {e.strerror or e}",
+                      file=sys.stderr)
+                continue
             if not found:
                 print(f"  (no .ecore files under {p})")
             for f in found:
-                resolved = f.resolve()
+                try:
+                    resolved = f.resolve()
+                except (OSError, PermissionError):
+                    resolved = f.absolute()
                 if resolved not in seen:
                     seen.add(resolved)
                     result.append(f)
@@ -414,7 +457,10 @@ def collect_ecore_files(inputs: list[str]) -> list[Path]:
             if p.suffix.lower() != ".ecore":
                 print(f"WARNING: skipping non-.ecore file: {p}", file=sys.stderr)
                 continue
-            resolved = p.resolve()
+            try:
+                resolved = p.resolve()
+            except (OSError, PermissionError):
+                resolved = p.absolute()
             if resolved not in seen:
                 seen.add(resolved)
                 result.append(p)
@@ -452,6 +498,13 @@ def main() -> int:
         except ET.ParseError as e:
             print(f"  ERROR parsing {p}: {e}", file=sys.stderr)
             continue
+        except PermissionError as e:
+            print(f"  ERROR: permission denied reading {p}: {e.strerror or e}",
+                  file=sys.stderr)
+            continue
+        except OSError as e:
+            print(f"  ERROR reading {p}: {e.strerror or e}", file=sys.stderr)
+            continue
         classes_by_file[str(p)] = classes
         total += len(classes)
         print(f"  {p}: {len(classes)} EClass(es)")
@@ -462,7 +515,30 @@ def main() -> int:
 
     doc = build_document(classes_by_file, title=args.title)
     out_path = Path(args.output)
-    doc.save(out_path)
+    try:
+        doc.save(out_path)
+    except PermissionError as e:
+        # Most common cause on Windows: the output .docx is open in Word,
+        # or the containing folder is read-only / syncing.
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback = out_path.with_name(f"{out_path.stem}_{stamp}{out_path.suffix}")
+        print(
+            f"\nERROR: could not write to {out_path}\n"
+            f"  ({e.strerror or e})\n"
+            f"  This usually means the file is open in Word, or the folder is\n"
+            f"  read-only / protected. Close the document and retry, or pick a\n"
+            f"  different -o path.\n"
+            f"  Attempting fallback: {fallback}",
+            file=sys.stderr,
+        )
+        try:
+            doc.save(fallback)
+            print(f"\nWrote {total} table(s) to {fallback}")
+            return 0
+        except PermissionError as e2:
+            print(f"  Fallback also failed: {e2.strerror or e2}", file=sys.stderr)
+            return 2
     print(f"\nWrote {total} table(s) to {out_path}")
     return 0
 
