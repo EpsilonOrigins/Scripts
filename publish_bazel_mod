@@ -76,3 +76,18 @@ echo "   bazel_dep(name = \"${MODULE_NAME}\", version = \"${VERSION}\")"
 echo "══════════════════════════════════════════"
 
 rm -rf "$TMP_DIR"
+
+MODULE_DIR="${REGISTRY_DIR}/modules/${MODULE_NAME}"
+VERSION_DIR="${MODULE_DIR}/${VERSION}"
+mkdir -p "$VERSION_DIR"
+ 
+# Generate source.json
+cat > "${VERSION_DIR}/source.json" << EOF
+{
+  "integrity": "${INTEGRITY}",
+  "strip_prefix": "${MODULE_NAME}",
+  "url": "${UPLOAD_URL}"
+}
+EOF
+echo "   Generated source.json:"
+cat "${VERSION_DIR}/source.json"
