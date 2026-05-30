@@ -1,0 +1,153 @@
+# ═══════════════════════════════════════════════════════════════
+# .gitlab-ci.yml — common_bazel_rule
+#
+# Stages:
+#   validate  → runs on every MR and push
+#   publish   → runs only on version tags (v1.0.0, v1.1.0, etc.)
+#
+# Required CI/CD variables (set at GitLab group level):
+#   ARTIFACTORY_URL    https://artifactory.your.org/artifactory/bazel-rules
+#   ARTIFACTORY_TOKEN  Artifactory API token with write access
+#   REGISTRY_REPO      git@gitlab.your.org:osf/osf_bazel_registry.git
+#   BAZEL_VERSION      must match .bazelversion (e.g. 7.4.1)
+# ═══════════════════════════════════════════════════════════════
+
+stages:
+  - validate
+  - publish
+
+# ── Default settings for all jobs ────────────────────────────
+default:
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq curl git jq xxd bazel xz-utils
+    - git config --global user.email "ci@your.org"
+    - git config --global user.name "OSF CI"
+
+# ─────────────────────────────────────────────────────────────
+# VALIDATE — runs on every push and MR
+# ─────────────────────────────────────────────────────────────
+
+# Job 1: required files exist and are well-formed
+validate:structure:
+  stage: validate
+  script:
+    - echo "── Checking required files exist..."
+    - test -f MODULE.bazel    || (echo "MISSING: MODULE.bazel"  && exit 1)
+    - test -f WORKSPACE       || (echo "MISSING: WORKSPACE"     && exit 1)
+    - test -f BUILD.bazel     || (echo "MISSING: BUILD.bazel"   && exit 1)
+    - test -f .bazelversion   || (echo "MISSING: .bazelversion" && exit 1)
+    - test -f rules/BUILD.bazel          || (echo "MISSING: rules/BUILD.bazel"          && exit 1)
+    - test -f rules/osf.bzl              || (echo "MISSING: rules/osf.bzl"              && exit 1)
+    - test -f rules/osf_internal.bzl     || (echo "MISSING: rules/osf_internal.bzl"     && exit 1)
+    - test -f rc/common.bazelrc          || (echo "MISSING: rc/common.bazelrc"          && exit 1)
+    - test -f rc/cache.bazelrc           || (echo "MISSING: rc/cache.bazelrc"           && exit 1)
+    - test -f rc/test.bazelrc            || (echo "MISSING: rc/test.bazelrc"            && exit 1)
+    - test -f rc/ci.bazelrc              || (echo "MISSING: rc/ci.bazelrc"              && exit 1)
+    - echo "── All required files present."
+
+    - echo "── Checking MODULE.bazel is valid JSON/Starlark (name + version present)..."
+    - grep -q 'name = "common_bazel_rule"' MODULE.bazel || (echo "MODULE.bazel missing module name" && exit 1)
+    - grep -q 'version = ' MODULE.bazel                 || (echo "MODULE.bazel missing version"     && exit 1)
+    - echo "── MODULE.bazel looks valid."
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# Job 2: version in MODULE.bazel matches the git tag (tag pipelines only)
+validate:version:
+  stage: validate
+  script:
+    - |
+      DECLARED=$(grep 'version = ' MODULE.bazel | head -1 | grep -o '"[^"]*"' | tr -d '"')
+      TAG_VERSION="${CI_COMMIT_TAG#v}"
+      echo "MODULE.bazel declares: ${DECLARED}"
+      echo "Git tag is:            ${TAG_VERSION}"
+      if [ "$DECLARED" != "$TAG_VERSION" ]; then
+        echo "ERROR: version mismatch — update MODULE.bazel before tagging."
+        exit 1
+      fi
+      echo "── Version match confirmed."
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# Job 3: Bazel can resolve the module graph
+validate:bazel:
+  stage: validate
+  script:
+    - echo "── Running bazel mod deps..."
+    - bazel mod deps --lockfile_mode=update
+    - echo "── Querying all targets..."
+    - bazel query //...
+    - echo "── Building all targets..."
+    - bazel build //...
+    - echo "── Bazel validation passed."
+  cache:
+    key: bazel-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - ~/.cache/bazel
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# Job 4: lockfile is committed and up to date
+validate:lockfile:
+  stage: validate
+  script:
+    - echo "── Checking lockfile is up to date..."
+    - bazel mod deps --lockfile_mode=update
+    - |
+      if ! git diff --exit-code MODULE.bazel.lock; then
+        echo "ERROR: MODULE.bazel.lock is stale."
+        echo "Run 'bazel mod deps --lockfile_mode=update' and commit the result."
+        exit 1
+      fi
+    - echo "── Lockfile is current."
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# Job 5: version doesn't already exist in Artifactory (tag pipelines only)
+validate:no_overwrite:
+  stage: validate
+  script:
+    - |
+      TAG_VERSION="${CI_COMMIT_TAG#v}"
+      URL="${ARTIFACTORY_URL}/common_bazel_rule/${TAG_VERSION}/common_bazel_rule-${TAG_VERSION}.tar.gz"
+      echo "── Checking ${URL} does not already exist..."
+      STATUS=$(curl --silent -H "Authorization: Bearer ${ARTIFACTORY_TOKEN}" \
+               -o /dev/null -w "%{http_code}" "$URL")
+      if [ "$STATUS" = "200" ]; then
+        echo "ERROR: version ${TAG_VERSION} already exists in Artifactory."
+        echo "Bump the version in MODULE.bazel and re-tag."
+        exit 1
+      fi
+      echo "── Version ${TAG_VERSION} is new. Safe to publish."
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+
+# ─────────────────────────────────────────────────────────────
+# PUBLISH — runs only on version tags after all validate jobs pass
+# ─────────────────────────────────────────────────────────────
+
+publish:release:
+  stage: publish
+  script:
+    - |
+      export VERSION="${CI_COMMIT_TAG#v}"
+      export ARTIFACTORY_TOKEN="${ARTIFACTORY_TOKEN}"
+      export ARTIFACTORY_URL="${ARTIFACTORY_URL}"
+      export REGISTRY_REPO="${REGISTRY_REPO}"
+      ./release/publish.sh
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  needs:
+    - validate:structure
+    - validate:version
+    - validate:bazel
+    - validate:no_overwrite
