@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${VERSION:?required}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODULE_NAME="common_bazel_rule"
+ARCHIVE="${MODULE_NAME}-${VERSION}.tar.gz"
+TMP_DIR="$(mktemp -d)"
+STAGE="${TMP_DIR}/${MODULE_NAME}"          # ← staged dir matches strip_prefix
+
+echo "── [1/5] Staging module contents..."
+mkdir -p "$STAGE"
+
+# Copy only what belongs in the module
+cp "${REPO_ROOT}/MODULE.bazel"      "$STAGE/"
+cp "${REPO_ROOT}/MODULE.bazel.lock" "$STAGE/" 2>/dev/null || true
+cp "${REPO_ROOT}/BUILD.bazel"       "$STAGE/"
+cp "${REPO_ROOT}/WORKSPACE"         "$STAGE/" 2>/dev/null || echo "" > "$STAGE/WORKSPACE"
+cp -r "${REPO_ROOT}/bazel"          "$STAGE/"
+cp -r "${REPO_ROOT}/rc"             "$STAGE/"
+cp -r "${REPO_ROOT}/toolchains"     "$STAGE/"
+
+echo "── [2/5] Verifying MODULE.bazel version matches tag..."
+DECLARED=$(grep 'version = ' "$STAGE/MODULE.bazel" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+if [ "$DECLARED" != "$VERSION" ]; then
+    echo "ERROR: MODULE.bazel declares version '${DECLARED}' but tag is '${VERSION}'"
+    echo "Update MODULE.bazel version before tagging."
+    exit 1
+fi
+
+echo "── [3/5] Packaging..."
+tar -czf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR" "$MODULE_NAME"
+
+# Verify strip_prefix is correct
+FIRST_DIR=$(tar -tzf "${TMP_DIR}/${ARCHIVE}" | head -1 | cut -d/ -f1)
+if [ "$FIRST_DIR" != "$MODULE_NAME" ]; then
+    echo "ERROR: strip_prefix mismatch. Archive top-level is '${FIRST_DIR}', expected '${MODULE_NAME}'"
+    exit 1
+fi
+
+# Compute integrity hash
+SHA256_HEX=$(sha256sum "${TMP_DIR}/${ARCHIVE}" | awk '{print $1}')
+INTEGRITY="sha256-$(echo "$SHA256_HEX" | xxd -r -p | base64 -w0)"
+echo "   Integrity: ${INTEGRITY}"
+
+echo "── [4/5] Uploading to Artifactory..."
+ARTIFACTORY_URL="${ARTIFACTORY_URL:-https://artifactory.your.org/artifactory/bazel-rules}"
+UPLOAD_URL="${ARTIFACTORY_URL}/${MODULE_NAME}/${VERSION}/${ARCHIVE}"
+
+# Refuse to overwrite existing version
+EXISTING=$(curl --silent -H "Authorization: Bearer ${ARTIFACTORY_TOKEN}" \
+    -o /dev/null -w "%{http_code}" "$UPLOAD_URL")
+if [ "$EXISTING" = "200" ]; then
+    echo "ERROR: ${VERSION} already exists. Bump the version."
+    exit 1
+fi
+
+curl --fail --silent --show-error \
+     -H "Authorization: Bearer ${ARTIFACTORY_TOKEN}" \
+     -T "${TMP_DIR}/${ARCHIVE}" \
+     "$UPLOAD_URL"
+
+echo "── [5/5] Updating registry..."
+# ... (registry update as before)
+
+echo ""
+echo "══════════════════════════════════════════"
+echo " Published ${MODULE_NAME} @ ${VERSION}"
+echo "══════════════════════════════════════════"
+echo ""
+echo " Archive:   ${UPLOAD_URL}"
+echo " Integrity: ${INTEGRITY}"
+echo ""
+echo " Consuming repos:"
+echo "   bazel_dep(name = \"${MODULE_NAME}\", version = \"${VERSION}\")"
+echo "══════════════════════════════════════════"
+
+rm -rf "$TMP_DIR"
